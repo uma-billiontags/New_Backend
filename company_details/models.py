@@ -1,0 +1,210 @@
+from django.db import models
+from django.contrib.auth.models import User
+from django.core.validators import validate_email 
+from django.core.exceptions import ValidationError
+import re 
+from datetime import datetime
+from categories.models import PaymentTerms, InvoiceCompanyAddress, InvoiceAuthorizedPerson, InvoiceBankDetails
+
+PAYMENT_TERM = (
+    ("Prepaid", "Prepaid"),
+    ("Postpaid", "Postpaid"),
+)
+
+# ==============================
+# CLIENT ID GENERATOR
+# ==============================
+def generate_client_id():
+    last = CompanyDetails.objects.order_by('id').last()  # Get the most recently created Company
+
+    if last:
+        last_num = int(last.client_id.replace('CL', ''))  # Extract number from ID (CL0005 → 5)
+        new_num = last_num + 1  # Increment (5 → 6)
+    else:
+        new_num = 1  # First client ever
+
+    return f"CL{str(new_num).zfill(4)}"  # CL0001, CL0002, ... CL9999
+
+def validate_comma_separated_emails(value):
+    """
+    Strict comma-separated email validator:
+      - exactly ONE comma between two emails (no double/triple commas like ",,")
+      - no leading or trailing comma
+      - no trailing full stop after an individual email or the whole list
+      - each individual email must still be a valid email address
+
+    Valid:   "a@x.com, b@x.com"
+    Invalid: "a@x.com,, b@x.com"   (double comma)
+    Invalid: "a@x.com, b@x.com."   (trailing full stop)
+    Invalid: ",a@x.com"           (leading comma)
+    Invalid: "a@x.com,"           (trailing comma)
+    """
+    if not value:
+        return
+
+    raw = value.strip()
+
+    if raw.startswith(","):
+        raise ValidationError("Email list cannot start with a comma.")
+    if raw.endswith(","):
+        raise ValidationError("Email list cannot end with a comma.")
+
+    # Catches ",," and ", ,"  (double comma with/without space in between)
+    if re.search(r",\s*,", raw):
+        raise ValidationError(
+            "Only one comma is allowed between two email addresses "
+            "(found consecutive commas)."
+        )
+
+    emails = [e.strip() for e in raw.split(",")]
+
+    for email in emails:
+        if not email:
+            raise ValidationError("Found an empty email address between commas.")
+
+        if email.endswith("."):
+            raise ValidationError(f"'{email}' should not end with a full stop.")
+
+        try:
+            validate_email(email)
+        except ValidationError:
+            raise ValidationError(f"'{email}' is not a valid email address.")
+        
+class CompanyDetails(models.Model):
+    objects = None
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="company")   # Django login account
+    client_id = models.CharField(max_length=60, unique=True, editable=False)   # auto generated client id (C0001, C0002, ...)
+    report_id = models.CharField(max_length=60, blank=True, null=True, verbose_name="Reporting ID")
+    name = models.CharField(max_length=120, unique=True) # Company name should be unique to avoid confusion in reports and invoices
+    
+    company_type = models.CharField(max_length=100)
+    agency_type = models.CharField(max_length=100, blank=True)
+    brand = models.CharField(max_length=200, blank=True)
+    website = models.URLField(blank=True)
+    
+    phone = models.CharField(max_length=15, blank=True, null=True) 
+    email = models.EmailField() 
+    
+    address_line1 = models.CharField(max_length=120)
+    address_line2 = models.CharField(max_length=120, blank=True, null=True)
+    country = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    city = models.CharField(max_length=100)
+    zipcode = models.CharField(max_length=8)
+    
+    billing_currency = models.CharField(max_length=20, default="INR")
+    
+    gst_number = models.CharField(max_length=40, blank=True, null=True)
+    cin_number = models.CharField(max_length=50, blank=True, null=True)
+    place_of_supply = models.CharField(max_length=100, blank=True)
+
+    credit_period_days = models.IntegerField()
+    is_domestic = models.BooleanField(default=False)
+    payment_type = models.CharField(max_length=50, choices=PAYMENT_TERM)
+    payment_terms = models.ForeignKey(PaymentTerms, on_delete=models.CASCADE, blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    
+    tax_type = models.CharField(max_length=50)
+    tds_applicable = models.BooleanField(default=False)
+    tds_section = models.CharField(max_length=50)
+    advance_amount = models.IntegerField()
+
+    credit_limit = models.FloatField()
+    outstanding_limit = models.FloatField()
+
+    # New Field add
+    INVOICE_TYPE = (("single", "Single Invoice"),("multiple", "Multiple Invoice"),)
+    default_contact_person = models.ForeignKey('CompanyContacts',blank=True,null=True,on_delete=models.SET_NULL,related_name="default_invoice_contact",verbose_name="Contact person")
+    invoice_type = models.CharField(max_length=20,choices=INVOICE_TYPE,default="single")
+    default_invoice_address = models.ForeignKey(InvoiceCompanyAddress,blank=True,null=True,on_delete=models.SET_NULL, verbose_name="From company address")
+    default_invoice_bank = models.ForeignKey(InvoiceBankDetails,blank=True,null=True,on_delete=models.SET_NULL, verbose_name="From bank account")
+    default_authorized_person = models.ForeignKey(InvoiceAuthorizedPerson,blank=True,null=True,on_delete=models.SET_NULL, verbose_name = 'Authorized person')
+
+    # Added by me
+    default_email_send_to = models.CharField(
+        max_length=500, blank=True, null=True,
+        verbose_name="Default Email To",
+        # help_text="Comma-separated email addresses (e.g. a@x.com, b@x.com)",
+        validators=[validate_comma_separated_emails],
+    )
+    default_email_send_cc = models.CharField(
+        max_length=500, blank=True, null=True,
+        verbose_name="Default Email CC",
+        # help_text="Comma-separated email addresses (e.g. a@x.com, b@x.com)",
+        validators=[validate_comma_separated_emails],
+    )
+    
+    # Added by me
+    show_campaign_name_in_email = models.BooleanField(
+        default=False,
+        verbose_name="Campaign name display in the email",
+        # help_text="Uncheck to hide campaign name(s) in invoice emails sent to this company.",
+    )
+    
+    created_on = models.DateTimeField(auto_now_add=True)
+    updated_on = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tbl_company_details"
+        verbose_name = "Company Details"
+        verbose_name_plural = "Company Details"
+        ordering = ["-client_id"]
+
+    def __str__(self):
+        return self.name
+
+
+# People at client company who will be in touch with us for campaign related communication, invoicing etc. Each contact person will have a separate login account (if needed in future)
+class CompanyContacts(models.Model):
+    objects = None
+    user = models.OneToOneField(User, on_delete=models.CASCADE, blank=True, null=True, related_name="company_contact_user")  # Django login account for company contact person (if needed in future)
+    company = models.ForeignKey(CompanyDetails, on_delete=models.CASCADE)  # which company they belong to
+    
+    name = models.CharField(max_length=120)
+    phone = models.CharField(max_length=15, blank=True, null=True)
+    email = models.EmailField()
+    designation = models.CharField(max_length=100)
+    
+    digital_signature = models.ImageField(upload_to="company-user-signature", blank=True, null=True)   # their signature image
+    address_line1 = models.CharField(max_length=120)
+    address_line2 = models.CharField(max_length=120, blank=True, null=True)
+    zipcode = models.CharField(max_length=8)
+    country = models.CharField(max_length=100)
+    
+    is_active = models.BooleanField(default=True)
+    
+    created_on = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tbl_company_contacts"
+        verbose_name = "Company Contacts"
+        verbose_name_plural = "Company Contacts"
+
+    def __str__(self):
+        return "{}-CP{:04d}".format(self.company.client_id, self.pk)
+
+    def get_id_name(self):
+        return "{}-CP{:04d}".format(self.company.client_id, self.pk)
+
+
+# It contains multiple addresses for a company (billing address, registered address, etc.)
+class CompanyAddress(models.Model):
+    objects = None
+    company = models.ForeignKey(CompanyDetails, on_delete=models.CASCADE)
+    address_line1 = models.CharField(max_length=120)
+    address_line2 = models.CharField(max_length=120, blank=True, null=True)
+    zipcode = models.CharField(max_length=8)
+    country = models.CharField(max_length=100)
+    is_primary = models.BooleanField(default=False) # Is this the main (primary) address or not?
+    is_active = models.BooleanField(default=True)
+    created_on = models.DateTimeField(auto_now_add=True)
+    updated_on = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = "tbl_company_address"
+        verbose_name = "Company Address"
+        verbose_name_plural = "Company Address"
+    
+    def __str__(self):
+        return str(self.company)   # change this line 
+    

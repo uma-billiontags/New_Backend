@@ -1,0 +1,2 @@
+python gmail_auth.py - Run this to create the token.pickle
+python manage.py sync_gmail_leads - To get the leads
