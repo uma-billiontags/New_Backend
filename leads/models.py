@@ -1,14 +1,23 @@
 from django.db import models
 from company_details.models import CompanyDetails
+from django.db import transaction
 
 def generate_ticket_id():
-    last = Lead.objects.exclude(ticket_id__isnull=True).order_by('id').last()
-    if last and last.ticket_id:
-        last_num = int(last.ticket_id.replace('TIK', ''))
-        new_num = last_num + 1
-    else:
-        new_num = 1
-    return f"TIK{str(new_num).zfill(4)}"   # TIK0001, TIK0002, ...
+    with transaction.atomic():
+        last = (
+            Lead.objects
+            .exclude(ticket_id__isnull=True)
+            .exclude(ticket_id="")
+            .select_for_update()
+            .order_by('-ticket_id') # ← fixed: order by the ticket number itself, not by lead id
+            .first()
+        )
+        if last and last.ticket_id:
+            last_num = int(last.ticket_id.replace('TIK', ''))
+            new_num = last_num + 1
+        else:
+            new_num = 1
+        return f"TIK{str(new_num).zfill(4)}"   # TIK0001, TIK0002, ...
 
 
 class ExcludedEmail(models.Model):

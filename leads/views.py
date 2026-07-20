@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from .models import Lead, LeadCategory, generate_ticket_id
 from .lead_rules import extract_email_address, find_matching_client
 from .serializers import LeadSerializer, LeadCategorySerializer
+from django.db import IntegrityError
 
 
 class LeadListAPIView(generics.ListAPIView):
@@ -18,11 +19,6 @@ class LeadCategoryListAPIView(generics.ListAPIView):
 
 
 class LeadCategorizeAPIView(APIView):
-    """
-    PATCH /leads/categorize_lead/<pk>/  { "category_name": "Creative Team" }
-    Assigns a category to an uncategorized lead, generates a ticket_id,
-    and tries to link a matching client if one isn't already set.
-    """
     def patch(self, request, pk):
         try:
             lead = Lead.objects.get(pk=pk)
@@ -39,16 +35,23 @@ class LeadCategorizeAPIView(APIView):
         lead.category_name = category_name
         lead.category_status = "category"
 
-        if not lead.ticket_id:
-            lead.ticket_id = generate_ticket_id()
-
         if not lead.client:
             sender_email = extract_email_address(lead.sender)
             client = find_matching_client(sender_email)
             if client:
                 lead.client = client
 
-        lead.save()
+        # retry a couple of times in case of a ticket_id collision
+        for attempt in range(3):
+            if not lead.ticket_id:
+                lead.ticket_id = generate_ticket_id()
+            try:
+                lead.save()
+                break
+            except IntegrityError:
+                if attempt == 2:
+                    return Response({"error": "Could not generate a unique ticket ID, please retry."}, status=500)
+                lead.ticket_id = None  # force a fresh generation and try again
 
         serializer = LeadSerializer(lead, context={"request": request})
         return Response(serializer.data, status=200)

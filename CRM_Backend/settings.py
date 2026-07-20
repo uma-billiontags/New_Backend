@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     
     # Added by me
     'corsheaders',
+    'django_celery_beat',
     
     'company_details',
     'leads',
@@ -152,3 +153,15 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     'ngrok-skip-browser-warning',  # ← add this
 ]
+
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+CELERY_TIMEZONE = TIME_ZONE          # reuse whatever your project already has
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+CELERY_BEAT_SCHEDULE = {
+    "reassign-overdue-tasks-every-5-minutes": {
+        "task": "tasks.views.reassign_overdue_tasks",
+        "schedule": 300.0,  # seconds — every 5 minutes
+    },
+}

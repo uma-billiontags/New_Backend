@@ -7,7 +7,6 @@ urlpatterns = [
 ]
 
 
-# runserver: daphne CRM_Backend.asgi:application
 
 
 

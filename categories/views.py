@@ -2,9 +2,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
-
 from . import models, serializers
-
 
 # ══════════════════════════════════════════
 # INVOICE BANK DETAILS
@@ -502,7 +500,7 @@ def delete_user_credential(request, id):
     obj.delete()
     return Response({"message": "Deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
 
-
+#----------------------------------------------------------------
 import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -513,6 +511,7 @@ from categories.models import UserCredential
 DEPARTMENT_DASHBOARD_MAP = {
     "account manager": "account_manager",
     "creative ops": "creative_ops",
+    "campaign ops": "campaign_ops",
 }
 
 @csrf_exempt
@@ -555,3 +554,4 @@ def login_view(request):
             "dashboard": dashboard_key,  # e.g. "account_manager" or "creative_ops"
         }
     })
+#----------------------------------------------------------------
